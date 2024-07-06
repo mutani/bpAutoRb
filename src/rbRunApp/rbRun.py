@@ -12,10 +12,12 @@ import random
 from tkinter import messagebox
 from PIL import ImageGrab
 from mss import mss
-from multiprocessing import Process, Event
+from multiprocessing import Event
 
 WINDOWTITLE = "BLUE PROTOCOL"
 CONFIDENCE = 0.8
+
+#images
 TARGET_IMAGE_FOLDER = "Image/targetImage/"
 COMMAND_MENU_MISSION = TARGET_IMAGE_FOLDER + "0_mission_command_menu.png"
 RETIRE = TARGET_IMAGE_FOLDER + "0_retire.png"
@@ -28,15 +30,36 @@ MISSION_RUSH4 = TARGET_IMAGE_FOLDER + "2_mission_rush4.png"
 SOLO_MATCHING = TARGET_IMAGE_FOLDER + "3_solo_matching.png"
 GOING_TO_BATTLE = TARGET_IMAGE_FOLDER + "4_going_matching.png"
 BATTLE_START = TARGET_IMAGE_FOLDER + "5_battle_start.png"
-EXIT_MATCH = TARGET_IMAGE_FOLDER + "exit_match.png"
-TELEPORTER = TARGET_IMAGE_FOLDER + "teleporter.png"
+EXIT_MATCH = TARGET_IMAGE_FOLDER + "6_exit_match.png"
+EXIT_MATCH_CHECK = TARGET_IMAGE_FOLDER + "6_exit_match_check.png"
+TELEPORTER = TARGET_IMAGE_FOLDER + "6_teleporter.png"
+#error
+ERROR_OK = TARGET_IMAGE_FOLDER + "error_ok.png"
+START_GAME = TARGET_IMAGE_FOLDER + "start_game.png"
 
+class BattleProcessManager:
+    def __init__(self):
+        self.process = None
 
-def rbRun():
+    def start_battle(self, arg_class, process_id):
+        battle_end_event = Event()
+        self.process = multiprocessing.Process(target=run_battle, args=(arg_class, battle_end_event,))
+        self.process.start()
+        if process_id is not None:
+            process_id.value = int(self.process.pid)
+        else:
+            raise ValueError("process_id is not initialized.")
+
+    def stop_battle(self):
+        if self.process and self.process.is_alive():
+            self.process.terminate()
+            self.process.join()
+
+def rbRun(arg_class, arg_rush, count_var, process_id):
     windowState = capture_process_window(WINDOWTITLE,False)
     if windowState == False:
         return
-    
+    print("1週目しか強制終了できないバグがあります。")
     #roop
     while True:
         pyautogui.press('m')
@@ -44,8 +67,22 @@ def rbRun():
         pyautogui.press('k')
         pyautogui.sleep(1)
         if find_button_and_click(WINDOWTITLE, MENU_RUSH) == False:
+            #121error
+            if wait_for_image_to_appear(ERROR_OK):
+                find_button_and_click(WINDOWTITLE, ERROR_OK)
+                find_button_and_click(WINDOWTITLE, START_GAME)
+                time.sleep(30)
             continue
-        find_button_and_click(WINDOWTITLE, MISSION_RUSH3)
+
+        if arg_rush == "1":
+            find_button_and_click(WINDOWTITLE, MISSION_RUSH1)
+        elif arg_rush == "3":
+            find_button_and_click(WINDOWTITLE, MISSION_RUSH3)
+        elif arg_rush == "4":
+            find_button_and_click(WINDOWTITLE, MISSION_RUSH4)
+        else:
+            find_button_and_click(WINDOWTITLE, MISSION_RUSH3)
+
         find_button_and_click(WINDOWTITLE, SOLO_MATCHING)
         root = tk.Tk()
         root.withdraw() 
@@ -55,48 +92,46 @@ def rbRun():
             messagebox.showinfo("error", "error: battle not found")
         #　battle start画像が出るまで待機
         if wait_for_image_to_appear(BATTLE_START, timeout=90):
-            battle_end_event = Event()
-            process = multiprocessing.Process(target=run_battle, args=(battle_end_event,))
-            process.start()
+            processManager = BattleProcessManager()
+            processManager.start_battle(arg_class, process_id)
             while True:
                 if wait_for_image_to_appear(EXIT_MATCH):
                     print('exit match')
-                    process.terminate()
+                    processManager.stop_battle()
                     break
-            process.join()
             find_button_and_click(WINDOWTITLE, EXIT_MATCH)
             time.sleep(battle.generate_random(1,3))
-            if wait_for_image_to_appear(EXIT_MATCH, timeout=3):
-                print('exit matchできてないよ')
-                for i in range(4):
+            if wait_for_image_to_appear(EXIT_MATCH_CHECK, timeout=3):
+                print('Could not exit match')
+                for _ in range(4):
                     pydirectinput.moveRel(random.randint(10,20), 0, duration=0.3)
                     pydirectinput.click()
                     time.sleep(battle.generate_random(0.2,0.4))
                 time.sleep(battle.generate_random(1,3))
-            wait_for_image_to_appear(TELEPORTER, timeout=35)
+            count_var.set(str(int(count_var.get()) + 1))
         #リタイア処理
         else:
             pyautogui.press('k')
             find_button_and_click(WINDOWTITLE, RETIRE)
             find_button_and_click(WINDOWTITLE, RETIRE_CONFIRM)
             messagebox.showinfo("error", "error: battle not found")
+        wait_for_image_to_appear(TELEPORTER, timeout=35)
+    
 
-def run_battle(battle_end_event):
-    battle.battleRun()
+def run_battle(arg_class,battle_end_event):
+    battle.battleRun(arg_class)
     if battle_end_event.is_set():
-        return  # ここで処理を終了
+        return
 
 def find_button_and_click(window_title, button_image_path, timeout=5):
-    # ウィンドウのハンドルを取得
     window = gw.getWindowsWithTitle(window_title)[0]
     window.activate()
-    pyautogui.sleep(0.4)  # ウィンドウがアクティブになるのを待つ
+    pyautogui.sleep(0.4)
     start_time = time.time()
     with mss() as sct:
         # モニターの情報を取得
         monitor = {"top": window.top, "left": window.left, "width": window.width, "height": window.height}
         while True:
-            # ウィンドウの画像をリアルタイムでキャプチャ
             img = np.array(sct.grab(monitor))
             # BGRからRGBへ変換
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
@@ -132,13 +167,12 @@ def wait_for_image_to_appear(image_path, timeout=30):
             if location:
                 return True
         except pyautogui.ImageNotFoundException:
-            # 画像が見つからない場合の処理
             pass
 
         if time.time() - start_time > timeout:
             print("wait_for_image:Timeout reached, image not found.:" + image_path)
             return None
-        time.sleep(0.1)  # 待機時間を設ける
+        time.sleep(0.1)
 
 def capture_process_window(title_substring, screenshot=True):
     """
@@ -150,10 +184,13 @@ def capture_process_window(title_substring, screenshot=True):
     # タイトルに部分文字列を含むウィンドウを検索
     windows = gw.getWindowsWithTitle(title_substring)
     if windows:
-        window = windows[0]  # 最初に見つかったウィンドウを使用
-        if window.isMinimized:  # ウィンドウが最小化されているか確認
-            window.restore()  # 最小化されている場合は復元
-        window.activate()  # ウィンドウをアクティブにする
+        window = windows[0]
+        if window.isMinimized:
+            window.restore()
+        try:
+            window.activate()
+        except gw.PyGetWindowException as e:
+            print(f"ウィンドウのアクティブ化に失敗しました: {e}")
 
         if screenshot == False:
             return None
@@ -167,3 +204,6 @@ def capture_process_window(title_substring, screenshot=True):
     else:
         print(f"No window found with title substring: {title_substring}")
         return False
+    
+if __name__ == '__main__':
+    rbRun()
