@@ -59,7 +59,6 @@ def rbRun(arg_class, arg_rush, count_var, process_id):
     windowState = capture_process_window(WINDOWTITLE,False)
     if windowState == False:
         return
-    print("1週目しか強制終了できないバグがあります。")
     #roop
     while True:
         pyautogui.press('m')
